@@ -105,7 +105,7 @@ export PATH="$PATH:$HOME/.local/zig/zig-x86_64-linux-0.15.2"
 Clone the project:
 
 ```bash
-git clone https://github.com/kirbylink/warp.git
+git clone https://github.com/palexdev/warp.git
 cd warp
 ```
 

@@ -1,18 +1,19 @@
 # warp
 
-![GitHub Release](https://img.shields.io/github/v/release/kirbylink/warp)
-![GitHub Downloads](https://img.shields.io/github/downloads/kirbylink/warp/latest/total)
-![GitHub Downloads](https://img.shields.io/github/downloads/kirbylink/warp/total)
-![License](https://img.shields.io/github/license/kirbylink/warp)
+![GitHub Release](https://img.shields.io/github/v/release/palexdev/warp)
+![GitHub Downloads](https://img.shields.io/github/downloads/palexdev/warp/latest/total)
+![GitHub Downloads](https://img.shields.io/github/downloads/palexdev/warp/total)
+![License](https://img.shields.io/github/license/palexdev/warp)
 
-A maintained fork of the original [Warp](https://github.com/dgiagio/warp) project with updated tooling, improved cross-platform builds, and compatibility fixes for modern systems.
+A fork of [Warp](https://github.com/kirbylink/warp) by [@kirbylink](https://github.com/kirbylink) with a bunch of fixes, major performance improvements, and some new features.
 
-This fork focuses on reliable multi-platform builds using **Rust**, **Zig**, and **cargo-zigbuild**, producing binaries for Linux, Windows, and macOS (including Apple Silicon).
+Original work by [dgiagio](https://github.com/dgiagio/warp).
 
 ---
 
 ## Table of Contents
 
+- [Changes in v1.4.0](#changes-in-v140)
 - [Changes in v1.3.0](#changes-in-v130)
 - [Changes in v1.2.0](#changes-in-v120)
 - [Changes in v1.0.0](#changes-in-v100)
@@ -31,6 +32,57 @@ This fork focuses on reliable multi-platform builds using **Rust**, **Zig**, and
 - [macOS Security Considerations](#macos-security-considerations)
 - [Authors](#authors)
 - [License](#license)
+
+---
+
+## Changes in v1.4.0
+
+### New CLI Options
+* `--no-persist`: Extract the application into a new temporary directory on every run and delete it when the application exits. Nothing is kept in the warp cache. Cannot be combined with `--unique-id`.
+* `--arch auto`: `--arch` is now optional and defaults to `auto`, which packs for the platform the packer runs on. It selects which runner is embedded, so it describes where the binary will run, not where it is packed. Passing a platform explicitly still allows packing for other platforms, for example `--arch windows-x64` on Linux, as long as the input directory contains the application built for that platform. `warp-packer list` marks the platform `auto` resolves to.
+* `--warp-clean` (on the packed binary, not the packer): Running `./app --warp-clean` deletes the application's cache directory instead of starting it. See [Cleaning the Cache](#cleaning-the-cache).
+
+### Improvements
+* **Faster first run:** The payload is split into 2 MiB chunks compressed with zstd (level 19) instead of a single gzip-compressed tar archive. The runner decompresses all chunks in parallel and writes each one directly to its final position.
+* **Smaller binaries:** zstd at level 19 produces smaller payloads than gzip at its best level.
+* **Faster warm starts:** A fixed footer at the end of the binary points to the arguments and the file index, so the runner no longer scans its own binary on every launch.
+* **Reliable updates:** The cache is validated with a hash of the payload instead of modification times. A new version always replaces the old one, even when its file has an older timestamp, and two applications with the same file name no longer run each other's files.
+* **Safe extraction:** Files are extracted into a temporary directory that is renamed into place under a file lock. An interrupted extraction is redone on the next launch, and concurrent first launches no longer interfere with each other.
+* **Ctrl+C handling:** The runner waits for the application to exit instead of terminating immediately, and on Unix reports a termination by signal as exit code 128 + signal.
+* **Constant memory use:** The runner reads each chunk into a small buffer instead of memory-mapping the whole binary. Peak memory during extraction stays around 50 MB, no matter how large the application is.
+* **Easier `--exec`:** The executable can be given relative to the input directory as before, or as a path from the current directory or an absolute path inside the input directory. For example, `-i myapp -e myapp/bin/run.sh` now works.
+
+### Fixes
+* Packing from an NTFS drive on Linux no longer stores small files as zeros.
+* Packing over an existing, larger output file no longer leaves stale bytes at the end of the binary.
+* `--exec` paths pointing outside the input directory are rejected instead of producing a binary that cannot find its executable.
+
+### Performance
+Measured on Linux x64 with a 45 MB jlink image:
+
+| | v1.3.0 | v1.4.0 |
+|---|---|---|
+| Binary size | 23.5 MB | 21.7 MB |
+| First run, extraction included | 294 ms | 188 ms |
+| Extraction alone | about 114 ms | about 13 ms |
+| First run with a cold page cache | 303 ms | 200 ms |
+| Warm run | 180 ms | 176 ms |
+| Run with `--no-persist` | n/a | 197 ms |
+
+Larger applications, first run with an empty cache:
+
+| | v1.3.0 | v1.4.0 |
+|---|---|---|
+| 130 MB Java desktop app | 407 ms | 84 ms |
+| 583 MB Electron app | 1641 ms | 190 ms |
+| Peak memory during extraction, 583 MB Electron app | 43 MB | 52 MB |
+
+The extraction speedup depends on the number of CPU cores.
+
+v1.3.0 used slightly less memory because it decompressed the payload as a single stream on one thread. v1.4.0 decompresses all chunks in parallel and needs a buffer per thread, which costs a few MB but keeps peak memory constant regardless of the application size.
+
+### Compatibility
+Binaries created with v1.4.0 use a new payload format. Binaries created with older versions keep working, because every binary contains its own runner.
 
 ---
 
@@ -84,19 +136,19 @@ warp-packer pack <args>
 ## Prebuilt Binaries
 
 Prebuilt `warp-packer` binaries are available on the
-[GitHub Releases](https://github.com/kirbylink/warp/releases) page.
+[GitHub Releases](https://github.com/palexdev/warp/releases) page.
 
 Available platforms:
 
 - Linux (x64, aarch64)
 - Windows (x64, aarch64)
-- macOS (x64, aarch64, universal)
+- macOS (x64, aarch64)
 
 Example download (Linux x64):
 
 ```bash
 curl -Lo warp-packer \
-https://github.com/kirbylink/warp/releases/latest/download/linux-x64.warp-packer
+https://github.com/palexdev/warp/releases/latest/download/linux-x64.warp-packer
 
 chmod +x warp-packer
 ```
@@ -113,7 +165,6 @@ chmod +x warp-packer
 | Windows | ARM64 | ✅ |
 | macOS | Intel | ✅ |
 | macOS | Apple Silicon | ✅ |
-| macOS | Universal | ✅ |
 
 ---
 
@@ -174,7 +225,7 @@ chmod +x launch
 If you save `warp-packer` in a directory in your PATH, you only need to download it once.
 ```sh
 cd ..
-curl -Lo warp-packer https://github.com/kirbylink/warp/releases/latest/download/linux-x64.warp-packer
+curl -Lo warp-packer https://github.com/palexdev/warp/releases/latest/download/linux-x64.warp-packer
 chmod +x warp-packer
 ```
 
@@ -258,7 +309,7 @@ chmod +x launch
 If you save `warp-packer` in a directory in your PATH, you only need to download it once.
 ```sh
 cd ..
-curl -Lo warp-packer https://github.com/kirbylink/warp/releases/latest/download/macos-x64.warp-packer
+curl -Lo warp-packer https://github.com/palexdev/warp/releases/latest/download/macos-x64.warp-packer
 chmod +x warp-packer
 ```
 
@@ -338,7 +389,7 @@ EXIT /B %ERRORLEVEL%
 If you save `warp-packer` in a directory in your PATH, you only need to download it once.
 ```powershell
 cd ..
-[Net.ServicePointManager]::SecurityProtocol = "tls12, tls11, tls" ; Invoke-WebRequest https://github.com/kirbylink/warp/releases/latest/download/windows-x64.warp-packer.exe -OutFile warp-packer.exe
+[Net.ServicePointManager]::SecurityProtocol = "tls12, tls11, tls" ; Invoke-WebRequest https://github.com/palexdev/warp/releases/latest/download/windows-x64.warp-packer.exe -OutFile warp-packer.exe
 ```
 
 **Create your self-contained application**
@@ -387,7 +438,7 @@ The application should be published to `bin/Release/netcoreapp2.1/linux-x64/publ
 
 If you save `warp-packer` in a directory in your PATH, you only need to download it once.
 ```sh
-curl -Lo warp-packer https://github.com/kirbylink/warp/releases/latest/download/linux-x64.warp-packer
+curl -Lo warp-packer https://github.com/palexdev/warp/releases/latest/download/linux-x64.warp-packer
 chmod +x warp-packer
 ```
 
@@ -437,7 +488,7 @@ The application should be published to `bin/Release/netcoreapp2.1/osx-x64/publis
 
 If you save `warp-packer` in a directory in your PATH, you only need to download it once.
 ```sh
-curl -Lo warp-packer https://github.com/kirbylink/warp/releases/latest/download/macos-x64.warp-packer
+curl -Lo warp-packer https://github.com/palexdev/warp/releases/latest/download/macos-x64.warp-packer
 chmod +x warp-packer
 ```
 
@@ -488,7 +539,7 @@ The application should be published to `bin/Release/netcoreapp2.1/win10-x64/publ
 
 If you save `warp-packer` in a directory in your PATH, you only need to download it once.
 ```powershell
-[Net.ServicePointManager]::SecurityProtocol = "tls12, tls11, tls" ; Invoke-WebRequest https://github.com/kirbylink/warp/releases/latest/download/windows-x64.warp-packer.exe -OutFile warp-packer.exe
+[Net.ServicePointManager]::SecurityProtocol = "tls12, tls11, tls" ; Invoke-WebRequest https://github.com/palexdev/warp/releases/latest/download/windows-x64.warp-packer.exe -OutFile warp-packer.exe
 ```
 
 **Create your self-contained application**
@@ -574,7 +625,7 @@ chmod +x bundle/run.sh
 7. **Download warp-packer** (if not already in PATH):
 
 ```bash
-curl -Lo warp-packer https://github.com/kirbylink/warp/releases/latest/download/linux-x64.warp-packer
+curl -Lo warp-packer https://github.com/palexdev/warp/releases/latest/download/linux-x64.warp-packer
 chmod +x warp-packer
 ```
 
@@ -602,15 +653,36 @@ Warp combines your runtime and application into a single file using two tools:
 
 <img src="documentation/warp-app-binary.png" width="272">
 
+### Binary Layout
+
+A packed binary consists of the runner, followed by the compressed file chunks, the packer arguments, the file index, and a fixed-size footer. The footer stores where the arguments and the index are located, so the runner can read them directly without scanning the file.
+
 ### First-time Run
 
-The first execution unpacks your app to a cache directory and runs it. Subsequent executions run directly.
+The first execution unpacks your app to a cache directory and runs it. Subsequent executions run directly. The cache is replaced automatically when the binary contains a different payload.
+
+With `--no-persist`, the app is unpacked into a new temporary directory on every run, and the directory is deleted when the app exits.
 
 ### Cache Directories
 
 * Linux: `$HOME/.local/share/warp/`
 * macOS: `$HOME/Library/Application Support/warp/`
 * Windows: `%LOCALAPPDATA%\warp\`
+
+Each application gets its own folder in `packages/`, named after the executable's file name. The application itself is extracted into a `static` subfolder.
+
+* `--prefix` sets a fixed folder name instead of the file name. Use it when the binary may be renamed (for example by version or by a browser download), so that all copies share one cache, or when two different applications have the same file name.
+* `--unique-id` extracts every build into its own subfolder instead of `static`, and by default removes the folders of other builds on launch. With `--no-clean`, older builds are kept, so several versions can run side by side. It is no longer needed for reliable updates, since the cache is validated with a hash of the payload.
+
+### Cleaning the Cache
+
+Running a packed binary with `--warp-clean` as its only argument deletes its whole cache folder, including all `--unique-id` builds, and exits without starting the application:
+
+```sh
+./app --warp-clean
+```
+
+If the flag is combined with other arguments, everything is passed to the application as usual. While the application is running, the cleanup is refused. This check only covers applications packed with warp 1.4.0 or later.
 
 ---
 
@@ -643,7 +715,7 @@ The build process used in this repository applies an **ad-hoc code signature** t
 ## Authors
 
 * Original Author: Diego Giagio `<diego@giagio.com>`
-* Modifications and enhancements by: [@kirbylink](https://github.com/kirbylink)
+* Modifications and enhancements by: [@kirbylink](https://github.com/kirbylink) and [@palexdev](https://github.com/palexdev)
 
 ---
 
