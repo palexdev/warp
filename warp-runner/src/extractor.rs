@@ -1,14 +1,11 @@
 use anyhow::{anyhow, bail, Context, Result};
-use bincode::Options;
 use log::trace;
 use memmap2::Mmap;
 use rayon::prelude::*;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
-use warp_args::{
-    bincode_options, index_bincode_options, Args, Chunk, Entry, EntryKind, Footer, FOOTER_LEN,
-};
+use warp_args::{decode, Args, Chunk, Entry, EntryKind, Footer, FOOTER_LEN};
 
 fn read_footer(file: &mut File) -> Result<Footer> {
     if file.metadata()?.len() < FOOTER_LEN as u64 {
@@ -37,7 +34,7 @@ pub fn get_args(src: &Path) -> Result<Args> {
     let footer = read_footer(&mut file)?;
     trace!("footer={:?}", footer);
     let bytes = read_section(&mut file, footer.args_offset, footer.args_len)?;
-    Ok(bincode_options().deserialize(&bytes)?)
+    Ok(decode(&bytes)?)
 }
 
 pub fn extract_to(src: &Path, dst: &Path) -> Result<()> {
@@ -45,7 +42,7 @@ pub fn extract_to(src: &Path, dst: &Path) -> Result<()> {
         .with_context(|| format!("Failed to open file to extract from: {}", src.display()))?;
     let footer = read_footer(&mut file)?;
     let index = read_section(&mut file, footer.index_offset, footer.index_len)?;
-    let entries: Vec<Entry> = index_bincode_options().deserialize(&index)?;
+    let entries: Vec<Entry> = decode(&index)?;
     let image = unsafe { Mmap::map(&file) }?;
 
     fs::create_dir_all(dst)?;

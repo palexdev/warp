@@ -1,6 +1,5 @@
 mod cli;
 
-use bincode::Options;
 use clap::Parser;
 use lazy_static::lazy_static;
 use rayon::prelude::*;
@@ -13,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::{collections::HashMap, io::BufWriter};
 use uuid::Uuid;
-use warp_args::{bincode_options, index_bincode_options, Args, Chunk, Entry, EntryKind, Footer};
+use warp_args::{encode, Args, Chunk, Entry, EntryKind, Footer};
 
 use crate::cli::Command;
 
@@ -192,17 +191,13 @@ fn append_payload(f: &mut impl io::Write, offset: u64, dir: &Path, mut args: Arg
         }
     }
 
-    let index = index_bincode_options()
-        .serialize(&entries)
-        .map_err(io::Error::other)?;
+    let index = encode(&entries).map_err(io::Error::other)?;
     hasher.update(&index);
     args.payload_id = hasher.finalize()[..16]
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect();
-    let args = bincode_options()
-        .serialize(&args)
-        .map_err(io::Error::other)?;
+    let args = encode(&args).map_err(io::Error::other)?;
     f.write_all(&args)?;
     f.write_all(&index)?;
     let footer = Footer {

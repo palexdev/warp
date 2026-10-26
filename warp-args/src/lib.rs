@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use bincode::Options;
 use serde::{Deserialize, Serialize};
 
 pub const FOOTER_MAGIC: &[u8; 12] = b"WARP-PAYLOAD";
@@ -79,13 +78,10 @@ impl Footer {
     }
 }
 
-pub fn bincode_options() -> impl bincode::Options {
-    bincode::DefaultOptions::new()
-        .with_fixint_encoding()
-        .allow_trailing_bytes()
-        .with_limit(1_000_000)
+pub fn encode<T: Serialize + ?Sized>(value: &T) -> postcard::Result<Vec<u8>> {
+    postcard::to_allocvec(value)
 }
 
-pub fn index_bincode_options() -> impl bincode::Options {
-    bincode::DefaultOptions::new().with_fixint_encoding()
+pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> postcard::Result<T> {
+    postcard::from_bytes(bytes)
 }

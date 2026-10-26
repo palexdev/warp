@@ -1,12 +1,11 @@
 [package]
 name = "warp-runner"
-version = "1.3.0"
+version = "1.4.0"
 authors = ["Diego Giagio <diego@giagio.com>", "Reisz", "kirbylink"]
 edition = "2021"
 
 [dependencies]
 anyhow = "1.0"
-bincode = "1.3"
 directories = "6.0"
 log = "0.4.29"
 memmap2 = "0.9"
@@ -14,7 +13,7 @@ rayon = "1.10"
 remove_dir_all = "1.0"
 simple_logger = "5.2"
 warp-args = { path = "../warp-args" }
-zstd = "0.13"
+zstd = "0.14"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
