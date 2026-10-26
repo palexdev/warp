@@ -4,6 +4,7 @@ use bincode::Options;
 use clap::Parser;
 use lazy_static::lazy_static;
 use rayon::prelude::*;
+use sha2::{Digest, Sha256};
 use std::error::Error;
 use std::fs;
 use std::fs::File;
@@ -150,7 +151,7 @@ fn compress_file(path: &Path) -> io::Result<Vec<(u32, Vec<u8>)>> {
         .collect()
 }
 
-fn append_payload(f: &mut impl io::Write, offset: u64, dir: &Path, args: &Args) -> io::Result<()> {
+fn append_payload(f: &mut impl io::Write, offset: u64, dir: &Path, mut args: Args) -> io::Result<()> {
     let mut entries = Vec::new();
     let mut files = Vec::new();
     collect_entries(dir, dir, &mut entries, &mut files)?;
@@ -166,6 +167,7 @@ fn append_payload(f: &mut impl io::Write, offset: u64, dir: &Path, args: &Args) 
         batch_len += file.len;
     }
 
+    let mut hasher = Sha256::new();
     let mut pos = offset;
     for batch in batches {
         let compressed = batch
@@ -178,6 +180,7 @@ fn append_payload(f: &mut impl io::Write, offset: u64, dir: &Path, args: &Args) 
             };
             for (chunk_len, data) in file_chunks {
                 f.write_all(&data)?;
+                hasher.update(&data);
                 chunks.push(Chunk {
                     offset: pos,
                     compressed_len: data.len() as u32,
@@ -189,11 +192,16 @@ fn append_payload(f: &mut impl io::Write, offset: u64, dir: &Path, args: &Args) 
         }
     }
 
-    let args = bincode_options()
-        .serialize(args)
-        .map_err(io::Error::other)?;
     let index = index_bincode_options()
         .serialize(&entries)
+        .map_err(io::Error::other)?;
+    hasher.update(&index);
+    args.payload_id = hasher.finalize()[..16]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let args = bincode_options()
+        .serialize(&args)
         .map_err(io::Error::other)?;
     f.write_all(&args)?;
     f.write_all(&index)?;
@@ -280,12 +288,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         &mut output,
         runner.len() as u64,
         &args.input_dir,
-        &Args {
+        Args {
             target_file_name: args.exec.to_string_lossy().into_owned(),
             prefix: args.prefix,
             uid: args.unique_id.then(|| format!("{}", Uuid::new_v4())),
             clean: args.clean,
             hidden: args.hidden,
+            payload_id: String::new(),
         },
     )
     .unwrap();

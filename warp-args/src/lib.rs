@@ -15,6 +15,8 @@ pub struct Args {
 
     #[serde(default)]
     pub hidden: bool,
+
+    pub payload_id: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
