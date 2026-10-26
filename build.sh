@@ -56,7 +56,7 @@ export PATH="$PATH:$ZIG_INSTALL_DIR"
 cd "$BASE_DIR"
 
 echo "Cloning warp..."
-git clone --depth 1 https://github.com/kirbylink/warp.git
+git clone --depth 1 https://github.com/palexdev/warp.git
 cd warp
 
 echo "Building warp..."
