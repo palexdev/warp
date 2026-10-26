@@ -25,7 +25,7 @@ pub struct PackArgs {
     #[arg(short, long)]
     pub input_dir: PathBuf,
 
-    /// Sets the application executable file name
+    /// Sets the application executable, relative to the input directory or as a path inside it
     #[arg(short, long)]
     pub exec: PathBuf,
 
