@@ -263,23 +263,51 @@ fn create_app_file(out: &Path) -> io::Result<File> {
         .open(out)
 }
 
+fn host_arch() -> Option<&'static str> {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => Some("linux-x64"),
+        ("linux", "aarch64") => Some("linux-aarch64"),
+        ("macos", "x86_64") => Some("macos-x64"),
+        ("macos", "aarch64") => Some("macos-aarch64"),
+        ("windows", "x86_64") => Some("windows-x64"),
+        ("windows", "aarch64") => Some("windows-aarch64"),
+        _ => None,
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let args = cli::Cli::parse();
 
     let args = match args.command {
         Command::List => {
             for arch in RUNNER_BY_ARCH.keys() {
-                println!("{arch}");
+                if host_arch() == Some(*arch) {
+                    println!("{arch} (auto)");
+                } else {
+                    println!("{arch}");
+                }
             }
             return Ok(());
         }
         Command::Pack(args) => args,
     };
 
-    if !RUNNER_BY_ARCH.contains_key(&args.arch.as_str()) {
+    let arch = if args.arch == "auto" {
+        match host_arch() {
+            Some(arch) => arch.to_string(),
+            None => bail!(
+                "Cannot detect the target platform for {}-{}, pass --arch explicitly",
+                std::env::consts::OS,
+                std::env::consts::ARCH
+            ),
+        }
+    } else {
+        args.arch.clone()
+    };
+    if !RUNNER_BY_ARCH.contains_key(&arch.as_str()) {
         bail!(
             "Unknown architecture specified: {}, supported: {:?}",
-            args.arch,
+            arch,
             RUNNER_BY_ARCH.keys()
         );
     }
@@ -296,8 +324,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         Err(err) => bail!("{}", err),
     };
 
-    println!("Creating self-contained application binary {:?}...", exec);
-    let runner = RUNNER_BY_ARCH.get(&args.arch.as_str()).unwrap();
+    println!(
+        "Creating self-contained application binary {:?} for {}...",
+        exec, arch
+    );
+    let runner = RUNNER_BY_ARCH.get(&arch.as_str()).unwrap();
     let mut output = BufWriter::new(create_app_file(&args.output).unwrap());
     output.write_all(runner)?;
 

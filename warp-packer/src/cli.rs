@@ -17,8 +17,8 @@ pub enum Command {
 
 #[derive(Args, Debug)]
 pub struct PackArgs {
-    /// Sets the architecture. Use list subcommand to get possible options.
-    #[arg(short, long)]
+    /// Sets the target platform of the binary, "auto" for the platform the packer runs on. Use list subcommand to get possible options.
+    #[arg(short, long, default_value = "auto")]
     pub arch: String,
 
     /// Sets the input directory containing the application and dependencies
