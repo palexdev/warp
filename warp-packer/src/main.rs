@@ -295,6 +295,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             clean: args.clean,
             hidden: args.hidden,
             payload_id: String::new(),
+            persist: args.persist,
         },
     )
     .unwrap();

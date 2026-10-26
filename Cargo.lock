@@ -908,12 +908,14 @@ dependencies = [
  "anyhow",
  "bincode",
  "directories",
+ "libc",
  "log",
  "memmap2",
  "rayon",
  "remove_dir_all 1.0.0",
  "simple_logger",
  "warp-args",
+ "windows-sys 0.61.2",
  "zstd",
 ]
 

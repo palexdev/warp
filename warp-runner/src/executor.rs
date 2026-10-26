@@ -7,6 +7,8 @@ use std::fs::Permissions;
 use std::io;
 #[cfg(target_family = "unix")]
 use std::os::unix::fs::PermissionsExt;
+#[cfg(target_family = "unix")]
+use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::Command;
 use std::process::Stdio;
@@ -32,15 +34,25 @@ fn ensure_executable(target: &Path) {
 fn do_execute(target: &Path, args: &[String], _hidden: bool) -> io::Result<i32> {
     ensure_executable(target);
 
-    Ok(Command::new(target)
+    let mut child = Command::new(target)
         .args(args)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .spawn()?
-        .wait()?
+        .spawn()?;
+    ignore_interrupts();
+    let status = child.wait()?;
+    Ok(status
         .code()
+        .or_else(|| status.signal().map(|signal| 128 + signal))
         .unwrap_or(1))
+}
+
+#[cfg(target_family = "unix")]
+fn ignore_interrupts() {
+    unsafe {
+        libc::signal(libc::SIGINT, libc::SIG_IGN);
+    }
 }
 
 #[cfg(target_family = "windows")]
@@ -80,5 +92,14 @@ fn do_execute(target: &Path, args: &[String], hidden: bool) -> io::Result<i32> {
            .stderr(Stdio::inherit());
     }
 
-    Ok(cmd.spawn()?.wait()?.code().unwrap_or(1))
+    let mut child = cmd.spawn()?;
+    ignore_interrupts();
+    Ok(child.wait()?.code().unwrap_or(1))
+}
+
+#[cfg(target_family = "windows")]
+fn ignore_interrupts() {
+    unsafe {
+        windows_sys::Win32::System::Console::SetConsoleCtrlHandler(None, 1);
+    }
 }

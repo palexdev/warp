@@ -17,6 +17,7 @@ pub struct Args {
     pub hidden: bool,
 
     pub payload_id: String,
+    pub persist: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

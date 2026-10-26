@@ -48,4 +48,12 @@ pub struct PackArgs {
     /// Hide the console window on Windows (useful for GUI applications)
     #[arg(long, default_value_t = false)]
     pub hidden: bool,
+
+    #[arg(
+        long = "no-persist",
+        action = clap::ArgAction::SetFalse,
+        conflicts_with = "unique_id",
+        help = "Extract to a temporary directory on every run and delete it when the application exits"
+    )]
+    pub persist: bool,
 }

@@ -6,8 +6,10 @@ use remove_dir_all::remove_dir_all;
 use std::env;
 use std::ffi::OsStr;
 use std::fs::{self, File};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process;
+use std::time::{SystemTime, UNIX_EPOCH};
 use warp_args::Args;
 
 use crate::extractor::get_args;
@@ -27,6 +29,62 @@ fn cache_path(target: &str) -> Result<PathBuf> {
         .join("warp")
         .join("packages")
         .join(target))
+}
+
+fn create_temp_folder(name: &str) -> Result<PathBuf> {
+    let base = env::temp_dir();
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.subsec_nanos();
+    for attempt in 0..16u32 {
+        let path = base.join(format!(
+            "warp-{name}-{}-{nanos:08x}{attempt:x}",
+            process::id()
+        ));
+        match create_private_folder(&path) {
+            Ok(()) => return Ok(path),
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(err) => {
+                return Err(err).with_context(|| format!("Failed to create {}", path.display()))
+            }
+        }
+    }
+    Err(anyhow!(
+        "Failed to create a temporary directory in {}",
+        base.display()
+    ))
+}
+
+#[cfg(target_family = "unix")]
+fn create_private_folder(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+
+    fs::DirBuilder::new().mode(0o700).create(path)
+}
+
+#[cfg(target_family = "windows")]
+fn create_private_folder(path: &Path) -> io::Result<()> {
+    fs::create_dir(path)
+}
+
+fn run_without_persisting(self_path: &Path, args: &Args) -> Result<i32> {
+    let name = args
+        .prefix
+        .as_deref()
+        .unwrap_or_else(|| Path::new(self_path.file_name().unwrap()))
+        .to_string_lossy()
+        .replace(['/', '\\'], "_");
+    let temp_path = create_temp_folder(&name)?;
+    trace!("temp_path={:?}", temp_path);
+
+    let result = extractor::extract_to(self_path, &temp_path).and_then(|_| {
+        Ok(executor::execute(
+            &temp_path.join(&args.target_file_name),
+            args.hidden,
+        )?)
+    });
+    if let Err(err) = remove_dir_all(&temp_path) {
+        trace!("failed to remove {:?}: {err}", temp_path);
+    }
+    result
 }
 
 fn is_current(cache_path: &Path, payload_id: &str) -> bool {
@@ -127,6 +185,10 @@ fn main() -> Result<()> {
     let self_path = env::current_exe()?;
     let args = get_args(&self_path).unwrap();
     trace!("args = {:?}", args);
+
+    if !args.persist {
+        process::exit(run_without_persisting(&self_path, &args)?);
+    }
 
     let cache_folder = create_cache_folder(&self_path, &args)?;
     let subfolder = args.uid.as_deref().unwrap_or(STATIC_SUBFOLDER_NAME);
