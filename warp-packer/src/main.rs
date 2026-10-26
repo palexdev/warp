@@ -143,6 +143,39 @@ fn collect_entries(
     Ok(())
 }
 
+fn resolve_exec(input_dir: &Path, exec: &Path) -> Result<String, String> {
+    let in_input_dir = input_dir.join(exec);
+    let candidate = if exec.is_relative() && in_input_dir.exists() {
+        in_input_dir
+    } else if exec.exists() {
+        exec.to_path_buf()
+    } else {
+        return Err(format!(
+            "Cannot find {:?} in the input directory {:?} (--exec is relative to --input-dir)",
+            exec, input_dir
+        ));
+    };
+    if !candidate.is_file() {
+        return Err(format!("{:?} isn't a file", candidate));
+    }
+
+    let input_dir = fs::canonicalize(input_dir).map_err(|err| err.to_string())?;
+    let parent = match candidate.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let exec_path = fs::canonicalize(parent)
+        .map_err(|err| err.to_string())?
+        .join(candidate.file_name().unwrap());
+    match exec_path.strip_prefix(&input_dir) {
+        Ok(relative) => utf8_path(relative).map_err(|err| err.to_string()),
+        Err(_) => Err(format!(
+            "{:?} is not inside the input directory {:?}",
+            exec, input_dir
+        )),
+    }
+}
+
 fn compress_file(path: &Path) -> io::Result<Vec<(u32, Vec<u8>)>> {
     let data = fs::read(path)?;
     data.par_chunks(CHUNK_SIZE)
@@ -258,22 +291,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         );
     }
 
-    let exec_path = args.input_dir.join(&args.exec);
-    match fs::metadata(&exec_path) {
-        Err(_) => {
-            bail!("Cannot find file {:?}", exec_path);
-        }
-        Ok(metadata) => {
-            if !metadata.is_file() {
-                bail!("{:?} isn't a file", exec_path);
-            }
-        }
-    }
+    let exec = match resolve_exec(&args.input_dir, &args.exec) {
+        Ok(exec) => exec,
+        Err(err) => bail!("{}", err),
+    };
 
-    println!(
-        "Creating self-contained application binary {:?}...",
-        args.exec
-    );
+    println!("Creating self-contained application binary {:?}...", exec);
     let runner = RUNNER_BY_ARCH.get(&args.arch.as_str()).unwrap();
     let mut output = BufWriter::new(create_app_file(&args.output).unwrap());
     output.write_all(runner)?;
@@ -284,7 +307,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         runner.len() as u64,
         &args.input_dir,
         Args {
-            target_file_name: args.exec.to_string_lossy().into_owned(),
+            target_file_name: exec,
             prefix: args.prefix,
             uid: args.unique_id.then(|| format!("{}", Uuid::new_v4())),
             clean: args.clean,
