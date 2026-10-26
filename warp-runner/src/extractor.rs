@@ -1,7 +1,6 @@
 use anyhow::{anyhow, bail, Context, Result};
 use bincode::Options;
 use log::trace;
-use memmap2::Mmap;
 use rayon::prelude::*;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom};
@@ -46,7 +45,6 @@ pub fn extract_to(src: &Path, dst: &Path) -> Result<()> {
     let footer = read_footer(&mut file)?;
     let index = read_section(&mut file, footer.index_offset, footer.index_len)?;
     let entries: Vec<Entry> = index_bincode_options().deserialize(&index)?;
-    let image = unsafe { Mmap::map(&file) }?;
 
     fs::create_dir_all(dst)?;
     for entry in &entries {
@@ -75,23 +73,27 @@ pub fn extract_to(src: &Path, dst: &Path) -> Result<()> {
             pos += chunk.len as u64;
         }
     }
-    tasks
-        .par_iter()
-        .try_for_each_init(Vec::new, |buf: &mut Vec<u8>, &(handle, pos, chunk)| -> Result<()> {
-            let start = chunk.offset as usize;
-            let compressed = image
-                .get(start..start + chunk.compressed_len as usize)
-                .ok_or_else(|| anyhow!("chunk out of bounds"))?;
+    tasks.par_iter().try_for_each_init(
+        || (Vec::new(), Vec::new()),
+        |(compressed, buf): &mut (Vec<u8>, Vec<u8>), &(handle, pos, chunk)| -> Result<()> {
+            let compressed_len = chunk.compressed_len as usize;
+            if compressed.len() < compressed_len {
+                compressed.resize(compressed_len, 0);
+            }
+            read_at(&file, &mut compressed[..compressed_len], chunk.offset)?;
             let len = chunk.len as usize;
             if buf.len() < len {
                 buf.resize(len, 0);
             }
-            if zstd::bulk::decompress_to_buffer(compressed, &mut buf[..len])? != len {
+            if zstd::bulk::decompress_to_buffer(&compressed[..compressed_len], &mut buf[..len])?
+                != len
+            {
                 bail!("corrupt chunk");
             }
             write_at(handle, &buf[..len], pos)?;
             Ok(())
-        })?;
+        },
+    )?;
 
     for entry in &entries {
         if let EntryKind::Symlink { target } = &entry.kind {
@@ -125,6 +127,28 @@ fn create_file(path: &Path, _mode: u32, len: u64) -> Result<File> {
         .with_context(|| format!("Failed to create {}", path.display()))?;
     file.set_len(len)?;
     Ok(file)
+}
+
+#[cfg(target_family = "unix")]
+fn read_at(file: &File, buf: &mut [u8], offset: u64) -> io::Result<()> {
+    use std::os::unix::fs::FileExt;
+
+    file.read_exact_at(buf, offset)
+}
+
+#[cfg(target_family = "windows")]
+fn read_at(file: &File, mut buf: &mut [u8], mut offset: u64) -> io::Result<()> {
+    use std::os::windows::fs::FileExt;
+
+    while !buf.is_empty() {
+        let n = file.seek_read(buf, offset)?;
+        if n == 0 {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
+        buf = &mut std::mem::take(&mut buf)[n..];
+        offset += n as u64;
+    }
+    Ok(())
 }
 
 #[cfg(target_family = "unix")]
